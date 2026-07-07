@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dat-framework"
+version = "0.1.0"
+description = "Decolonial Appropriate Technology framework - intersectional fairness for African contexts"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["src"]
