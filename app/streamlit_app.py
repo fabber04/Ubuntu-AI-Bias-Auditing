@@ -9,8 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Allow running `streamlit run app/streamlit_app.py` straight from a repo clone
-# without requiring `pip install -e .` first.
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -26,6 +24,9 @@ from dat_framework.config import (
     FairnessWeights,
     PROTECTED_ATTRIBUTES,
     SUB_SAHARAN_COUNTRIES,
+    UTILITY_RETENTION_FLOOR,
+    WORLD_BANK_DEFAULT_INDICATORS,
+    WORLD_BANK_INDICATOR_CATEGORIES,
     WORLD_BANK_INDICATORS,
 )
 from dat_framework.data.synthetic_dhs import SyntheticDataConfig, generate_dataset
@@ -42,37 +43,190 @@ from dat_framework.optimization.pareto import (
 )
 from dat_framework.optimization.preprocessing import assign_intersectional_subgroups
 
-st.set_page_config(page_title="DAT Framework — Ubuntu Fairness", layout="wide")
+st.set_page_config(page_title="DAT Fairness Lab", page_icon="🌍", layout="wide")
 
-# ---------------------------------------------------------------------------
-# Sidebar — data + weight controls
-# ---------------------------------------------------------------------------
-st.sidebar.title("⚙️ Configuration")
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+if "chart_accent" not in st.session_state:
+    st.session_state.chart_accent = "Terracotta"
 
-st.sidebar.subheader("1. Dataset")
-n_records = st.sidebar.slider("Number of synthetic records", 500, 6000, 2000, step=250)
-seed = st.sidebar.number_input("Random seed", value=42, step=1)
-min_group_size = st.sidebar.slider("Minimum subgroup size (for metric stability)", 3, 30, 8)
+ACCENT_HEXES = {
+    "Terracotta": {"light": "#C1552D", "dark": "#E58259"},
+    "Forest Green": {"light": "#2F5233", "dark": "#5C9A73"},
+    "Gold": {"light": "#B8842E", "dark": "#E8B85C"},
+}
 
-st.sidebar.subheader("2. Fairness weights (Tier 2)")
-domain = st.sidebar.selectbox(
-    "Domain preset", ["neutral", "health", "finance", "custom"],
-    help="Paper section 3.5: 'the weight of DIR may be 0.7 in a health dataset, "
-         "and 0.3 in a finance dataset.'",
-)
-if domain == "custom":
-    w_dir = st.sidebar.slider("w1 — DIR weight", 0.0, 1.0, 0.4)
-    w_eod = st.sidebar.slider("w2 — EOD weight", 0.0, 1.0 - w_dir, min(0.3, 1 - w_dir))
-    w_dpd = round(1.0 - w_dir - w_eod, 4)
-    st.sidebar.caption(f"w3 — DPD weight (auto): {w_dpd}")
-    weights = FairnessWeights(w_dir=w_dir, w_eod=w_eod, w_dpd=w_dpd)
-else:
-    weights = DOMAIN_WEIGHT_PRESETS[domain]
-    st.sidebar.caption(
-        f"w1(DIR)={weights.w_dir}, w2(EOD)={weights.w_eod}, w3(DPD)={weights.w_dpd}"
+
+def current_accent_hex() -> str:
+    mode = "dark" if st.session_state.dark_mode else "light"
+    return ACCENT_HEXES[st.session_state.chart_accent][mode]
+
+
+def inject_theme_css(dark: bool):
+    if dark:
+        vars_css = """
+            --bg:#1E1A16; --card-bg:#27211B; --card-border:#3B3128;
+            --text-primary:#F5EFE6; --text-secondary:#C9BBA8;
+            --accent:#E07A4B; --accent-green:#5C9A73; --accent-gold:#E8B85C;
+            --sidebar-bg:#221D18; --shadow:0 2px 10px rgba(0,0,0,0.45);
+        """
+    else:
+        vars_css = """
+            --bg:#FBF7F1; --card-bg:#FFFFFF; --card-border:#EDE1CE;
+            --text-primary:#2B2420; --text-secondary:#6B5F52;
+            --accent:#C1552D; --accent-green:#2F5233; --accent-gold:#B8842E;
+            --sidebar-bg:#F4EEE1; --shadow:0 1px 4px rgba(43,36,32,0.10);
+        """
+    st.markdown(
+        f"""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        :root {{ {vars_css} }}
+        html, body, .stApp {{
+            background-color: var(--bg) !important;
+            font-family: 'Inter', sans-serif;
+        }}
+        .stApp, .stApp p, .stApp span, .stApp label, .stMarkdown {{
+            color: var(--text-primary);
+        }}
+        section[data-testid="stSidebar"] {{
+            background-color: var(--sidebar-bg) !important;
+            border-right: 1px solid var(--card-border);
+        }}
+        div[data-testid="stExpander"] {{
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border) !important;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }}
+        div[data-baseweb="tab-list"] {{
+            gap: 6px; background-color: var(--card-bg);
+            padding: 6px; border-radius: 12px; border: 1px solid var(--card-border);
+        }}
+        button[data-baseweb="tab"] {{
+            border-radius: 8px !important; font-weight: 600;
+            color: var(--text-secondary) !important;
+        }}
+        button[data-baseweb="tab"][aria-selected="true"] {{
+            background-color: var(--accent) !important; color: white !important;
+        }}
+        div.stButton > button {{
+            border-radius: 8px; border: 1px solid var(--card-border); font-weight: 600;
+        }}
+        div.stButton > button[kind="primary"] {{
+            background-color: var(--accent); border-color: var(--accent); color: white;
+        }}
+        div[data-testid="stDataFrame"] {{
+            border-radius: 10px; overflow: hidden; border: 1px solid var(--card-border);
+        }}
+        .dat-card {{
+            background-color: var(--card-bg); border: 1px solid var(--card-border);
+            border-radius: 14px; padding: 14px 18px; box-shadow: var(--shadow);
+            height: 100%;
+        }}
+        .dat-card-icon {{ font-size: 1.3rem; margin-bottom: 2px; }}
+        .dat-card-label {{
+            color: var(--text-secondary); font-size: 0.75rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.03em;
+        }}
+        .dat-card-value {{
+            color: var(--text-primary); font-size: 1.6rem; font-weight: 800;
+            margin: 2px 0 2px 0; line-height: 1.1;
+        }}
+        .dat-card-sub {{ color: var(--text-secondary); font-size: 0.75rem; }}
+        .dat-header-title {{
+            font-size: 2rem; font-weight: 800; color: var(--text-primary);
+            margin-bottom: 0; line-height: 1.15;
+        }}
+        .dat-header-sub {{ color: var(--text-secondary); font-size: 0.95rem; margin-top: 2px; }}
+        .dat-header-byline {{ color: var(--text-secondary); font-size: 0.8rem; margin-top: 2px; }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
+
+inject_theme_css(st.session_state.dark_mode)
+
+
+def metric_card_row(cards):
+    cols = st.columns(len(cards))
+    for col, (icon, label, value, sub) in zip(cols, cards):
+        with col:
+            st.markdown(
+                f"""
+                <div class="dat-card">
+                    <div class="dat-card-icon">{icon}</div>
+                    <div class="dat-card-label">{label}</div>
+                    <div class="dat-card-value">{value}</div>
+                    <div class="dat-card-sub">{sub}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+st.sidebar.markdown(
+    """
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+        <span style="font-size:1.5rem;">🦁</span>
+        <span style="font-size:1.15rem; font-weight:800;">DAT Fairness Lab</span>
+    </div>
+    <div style="color:var(--text-secondary); font-size:0.75rem; margin-bottom:14px;">v1.1.0</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+with st.sidebar.expander("1. Dataset Configuration", expanded=True):
+    n_records = st.slider("Number of synthetic records", 500, 6000, 2000, step=250)
+    seed = st.number_input("Random seed", value=42, step=1)
+    min_group_size = st.slider("Minimum subgroup size (for metric stability)", 3, 30, 8)
+
+with st.sidebar.expander("2. Fairness Weights (Tier 2)", expanded=True):
+    domain = st.selectbox(
+        "Domain preset", ["neutral", "health", "finance", "hiring", "custom"],
+        help="Paper section 3.5: 'the weight of DIR may be 0.7 in a health dataset, "
+             "and 0.3 in a finance dataset.' Hiring is weighted around DIR since the "
+             "0.80 threshold this tool enforces is the legal four-fifths rule "
+             "(EEOC Uniform Guidelines, 1978).",
+    )
+    if domain == "custom":
+        w_dir = st.slider("w1 — DIR weight", 0.0, 1.0, 0.4)
+        w_eod = st.slider("w2 — EOD weight", 0.0, 1.0 - w_dir, min(0.3, 1 - w_dir))
+        w_dpd = round(1.0 - w_dir - w_eod, 4)
+        st.caption(f"w3 — DPD weight (auto): {w_dpd}")
+        weights = FairnessWeights(w_dir=w_dir, w_eod=w_eod, w_dpd=w_dpd)
+    else:
+        weights = DOMAIN_WEIGHT_PRESETS[domain]
+        st.caption(f"w1(DIR)={weights.w_dir}, w2(EOD)={weights.w_eod}, w3(DPD)={weights.w_dpd}")
+
+with st.sidebar.expander("3. Model & Evaluation", expanded=False):
+    utility_floor_pct = st.slider(
+        "Utility floor (% of baseline accuracy)", 80, 100, int(UTILITY_RETENTION_FLOOR * 100),
+        help="Tier 2's gamma_utility constraint: the MOO sweep won't accept a solution "
+             "that drops accuracy below this percentage of the baseline model's accuracy.",
+    )
+    slsqp_max_iter = st.slider(
+        "SLSQP max iterations", 20, 150, 60, step=10,
+        help="More iterations can find a better-optimized point per w0, at the cost of "
+             "a slower sweep. 60 is a reasonable default for datasets under ~3,000 records.",
+    )
+
+with st.sidebar.expander("4. Visualization Options", expanded=False):
+    st.session_state.chart_accent = st.radio(
+        "Chart accent color", list(ACCENT_HEXES.keys()),
+        index=list(ACCENT_HEXES.keys()).index(st.session_state.chart_accent),
+        horizontal=True,
+    )
+    st.caption("Applies to neutral (non-semantic) charts. Red/green violation coloring "
+               "elsewhere is left alone since it carries meaning.")
+
 st.sidebar.divider()
+dark_toggle = st.sidebar.toggle("🌙 Dark mode", value=st.session_state.dark_mode)
+if dark_toggle != st.session_state.dark_mode:
+    st.session_state.dark_mode = dark_toggle
+    st.rerun()
+
 st.sidebar.caption(
     "Data note: DHS microdata is gated behind a registered-researcher account, so "
     "this app uses a structurally-equivalent **synthetic** stand-in calibrated to "
@@ -80,15 +234,64 @@ st.sidebar.caption(
     "DHS extract by matching the schema in `data/synthetic_dhs.py`."
 )
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-st.title("🌍 From Universalism to Ubuntu")
-st.caption(
-    "A working reproduction of the Decolonial Appropriate Technology (DAT) framework — "
-    "intersectional fairness for AI/ML in Sub-Saharan Africa. "
-    "Dube, Mguni & Dube (2025), ICAT 2026."
-)
+
+@st.cache_data(show_spinner=False)
+def _get_data(n, seed_):
+    df = generate_dataset(SyntheticDataConfig(n_records=n, seed=seed_))
+    df = assign_intersectional_subgroups(df, PROTECTED_ATTRIBUTES)
+    return df
+
+
+df = _get_data(n_records, int(seed))
+
+with st.sidebar.expander("5. Export & Reporting", expanded=False):
+    st.download_button(
+        "⬇ Export dataset (CSV)",
+        data=df.drop(columns=["subgroup_tuple"]).to_csv(index=False).encode(),
+        file_name="dat_synthetic_dataset.csv", mime="text/csv",
+        use_container_width=True,
+    )
+    _report_single = single_attribute_metrics(df, y_pred_col="y_pred_baseline")
+    _report_lines = [
+        "DAT Fairness Lab — Summary Report",
+        f"Dataset: {len(df):,} synthetic records, seed={seed}, domain preset={domain}",
+        "",
+        "Single-attribute baseline DIR/DPD/EOD:",
+        _report_single[["DIR", "DPD", "EOD"]].round(3).to_string(),
+        "",
+        f"Fairness weights: DIR={weights.w_dir}, EOD={weights.w_eod}, DPD={weights.w_dpd}",
+        f"Minimum subgroup size: {min_group_size}",
+    ]
+    st.download_button(
+        "⬇ Download report (TXT)",
+        data="\n".join(_report_lines).encode(),
+        file_name="dat_summary_report.txt", mime="text/plain",
+        use_container_width=True,
+    )
+
+head_col, reset_col = st.columns([6, 1])
+with head_col:
+    st.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:14px;">
+            <div style="font-size:2.1rem;">🌍</div>
+            <div>
+                <div class="dat-header-title">From Universalism to Ubuntu</div>
+                <div class="dat-header-sub">Decolonial Appropriate Technology (DAT) Framework ·
+                Intersectional fairness for AI/ML in Sub-Saharan Africa</div>
+                <div class="dat-header-byline">Dube, Mguni &amp; Dube (2025) · ICAT 2026</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with reset_col:
+    st.write("")
+    if st.button("↻ Reset", use_container_width=True):
+        st.cache_data.clear()
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.rerun()
 
 tabs = st.tabs([
     "📊 Data & Context",
@@ -97,20 +300,8 @@ tabs = st.tabs([
     "⚖️ Tier 1–3: DAT / MOO Framework",
 ])
 
-# ---------------------------------------------------------------------------
-# Cache-friendly generation
-# ---------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def _get_data(n, seed_):
-    df = generate_dataset(SyntheticDataConfig(n_records=n, seed=seed_))
-    df = assign_intersectional_subgroups(df, PROTECTED_ATTRIBUTES)
-    return df
-
-
 @st.cache_data(show_spinner=False)
 def _get_worldbank_cached(countries: tuple, indicators: tuple):
-    """Cached path used once we already know the pull succeeded — subsequent
-    reruns with the same selection won't re-hit the API at all."""
     from dat_framework.data.worldbank import fetch_all_indicators, latest_value_per_country
     countries_dict = {k: SUB_SAHARAN_COUNTRIES[k] for k in countries}
     indicators_dict = {k: WORLD_BANK_INDICATORS[k] for k in indicators}
@@ -118,12 +309,17 @@ def _get_worldbank_cached(countries: tuple, indicators: tuple):
     return latest_value_per_country(raw)
 
 
-df = _get_data(n_records, int(seed))
-
-# ---------------------------------------------------------------------------
-# TAB 1 — Data & Context
-# ---------------------------------------------------------------------------
 with tabs[0]:
+    positive_rate = df["y_true"].mean()
+    metric_card_row([
+        ("🗂️", "Dataset Size", f"{len(df):,}", "Synthetic Records"),
+        ("👥", "Protected Attributes", f"{len(PROTECTED_ATTRIBUTES)}", "Intersectional Groups"),
+        ("📈", "Positive Rate (Overall)", f"{positive_rate:.0%}", "y_true = 1"),
+        ("⚖️", "Fairness Domain", domain.capitalize(), "Domain Preset"),
+        ("🛡️", "Minimum Group Size", f"{min_group_size}", "For Metric Stability"),
+    ])
+    st.write("")
+
     col1, col2 = st.columns([3, 2])
     with col1:
         st.subheader("Synthetic individual-level dataset")
@@ -138,18 +334,27 @@ with tabs[0]:
         fig = px.bar(
             prevalence, orientation="h",
             labels={"value": "Share of population marked disadvantaged", "index": ""},
-            title=None,
+            text=[f"{v:.0%}" for v in prevalence.values],
         )
-        fig.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=10, b=0))
+        fig.update_traces(marker_color=current_accent_hex(), textposition="outside")
+        fig.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=10, b=0),
+                           plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
     st.subheader("World Bank context (live pull)")
     st.caption(
         "Section 3.2's country selection — one per Sub-Saharan sub-region — pulled live "
-        "from the World Bank's public WDI API."
+        "from the World Bank's public WDI API. Pick any mix of indicators across domains "
+        "below; note WDI has no race/ethnicity variable for these countries — that's a real "
+        "gap in the data, not a missing checkbox here."
     )
-    wb_cols = st.columns([2, 2, 1])
+
+    _indicator_to_category = {
+        code: cat for cat, inds in WORLD_BANK_INDICATOR_CATEGORIES.items() for code in inds
+    }
+
+    wb_cols = st.columns([2, 3, 1])
     with wb_cols[0]:
         chosen_countries = st.multiselect(
             "Countries", options=list(SUB_SAHARAN_COUNTRIES.keys()),
@@ -158,9 +363,10 @@ with tabs[0]:
         )
     with wb_cols[1]:
         chosen_indicators = st.multiselect(
-            "Indicators", options=list(WORLD_BANK_INDICATORS.keys()),
-            default=list(WORLD_BANK_INDICATORS.keys()),
-            format_func=lambda i: WORLD_BANK_INDICATORS[i],
+            "Indicators (any mix of domains)",
+            options=list(WORLD_BANK_INDICATORS.keys()),
+            default=WORLD_BANK_DEFAULT_INDICATORS,
+            format_func=lambda i: f"[{_indicator_to_category[i]}] {WORLD_BANK_INDICATORS[i]}",
         )
     with wb_cols[2]:
         st.write("")
@@ -192,7 +398,7 @@ with tabs[0]:
                     wb_df = latest_value_per_country(raw)
                     progress_bar.empty()
                     st.session_state.setdefault("_wb_cache", {})[cache_key] = wb_df
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     progress_bar.empty()
                     st.error(
                         f"Couldn't reach the World Bank API from this environment ({exc}). "
@@ -210,13 +416,10 @@ with tabs[0]:
                 )
                 st.plotly_chart(fig2, use_container_width=True)
             elif "_wb_cache" not in st.session_state or cache_key not in st.session_state.get("_wb_cache", {}):
-                pass  # error already shown above
+                pass
             else:
                 st.warning("World Bank API returned no data for this selection.")
 
-# ---------------------------------------------------------------------------
-# TAB 2 — Bias diagnostics
-# ---------------------------------------------------------------------------
 with tabs[1]:
     st.subheader("6.0 / 6.1 — Single-attribute fairness metrics")
     st.caption("Comparing the biased baseline model against a classic single-axis fairness fix.")
@@ -271,7 +474,8 @@ with tabs[1]:
         fig3.add_hline(y=0.8, line_dash="dash", line_color="gray",
                         annotation_text="0.80 disparate-impact threshold")
         fig3.update_layout(height=420, xaxis_tickangle=-35,
-                            yaxis_title="Disparate Impact Ratio", xaxis_title="Intersectional subgroup")
+                            yaxis_title="Disparate Impact Ratio", xaxis_title="Intersectional subgroup",
+                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig3, use_container_width=True)
         st.dataframe(
             show_df[["DIR", "DPD", "EOD", "n_marginalized", "DIR_violation"]]
@@ -279,9 +483,6 @@ with tabs[1]:
             use_container_width=True,
         )
 
-# ---------------------------------------------------------------------------
-# TAB 3 — Statistical validation
-# ---------------------------------------------------------------------------
 with tabs[2]:
     st.subheader("t-tests: single-attribute vs. intersectional")
     baseline_inter = intersectional_metrics(
@@ -345,9 +546,10 @@ with tabs[2]:
             check["reference_rate"], check[f"only_{attr_a}_rate"], check[f"only_{attr_b}_rate"],
             check["observed_joint_rate"], check["additive_prediction"],
         ]
-        colors = ["#7f7f7f", "#1f77b4", "#1f77b4", "#d62728", "#ff7f0e"]
+        colors = ["#9c9c9c", current_accent_hex(), current_accent_hex(), "#d62728", "#e8a23d"]
         fig4.add_trace(go.Bar(x=labels, y=values, marker_color=colors))
-        fig4.update_layout(height=380, yaxis_title="Mean positive prediction rate")
+        fig4.update_layout(height=380, yaxis_title="Mean positive prediction rate",
+                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig4, use_container_width=True)
         gap = check["compounding_gap"]
         if check["is_super_additive_harm"]:
@@ -361,9 +563,6 @@ with tabs[2]:
     else:
         st.caption("Pick two different attributes to compare.")
 
-# ---------------------------------------------------------------------------
-# TAB 4 — Tier 1-3 DAT / MOO framework
-# ---------------------------------------------------------------------------
 with tabs[3]:
     st.subheader("Tier 1 — Sankofa-inspired intersectional mapping")
     st.caption(
@@ -386,7 +585,8 @@ with tabs[3]:
     with info_col:
         st.caption(
             f"Weights: DIR={weights.w_dir}, EOD={weights.w_eod}, DPD={weights.w_dpd} · "
-            f"min subgroup size={min_group_size} · this takes roughly "
+            f"min subgroup size={min_group_size} · utility floor={utility_floor_pct}% · "
+            f"max SLSQP iterations={slsqp_max_iter} · this takes roughly "
             f"{max(1, n_records // 40)}s–{max(2, n_records // 15)}s depending on dataset size."
         )
 
@@ -398,7 +598,11 @@ with tabs[3]:
                                                f"accuracy={sol.accuracy:.2%}, fairness_loss={sol.fairness_loss:.3f}")
 
         with st.spinner("Running 21-point SLSQP sweep..."):
-            solutions = run_w0_sweep(df, weights, min_group_size=min_group_size, progress_callback=_cb)
+            solutions = run_w0_sweep(
+                df, weights, min_group_size=min_group_size,
+                utility_floor=utility_floor_pct / 100, max_iter=slsqp_max_iter,
+                progress_callback=_cb,
+            )
         progress.empty()
         st.session_state["moo_solutions_df"] = solutions_to_dataframe(solutions)
         st.success("Sweep complete.")
@@ -427,7 +631,8 @@ with tabs[3]:
         fig5.add_trace(go.Scatter(
             x=pareto["fairness_loss"], y=pareto["accuracy_pct"],
             mode="markers+lines", name="Pareto-optimal front",
-            marker=dict(color="#d62728", size=12, symbol="diamond"),
+            marker=dict(color=current_accent_hex(), size=12, symbol="diamond"),
+            line=dict(color=current_accent_hex()),
             text=[f"w0={w:.2f}" for w in pareto["w0"]],
         ))
         fig5.update_layout(
@@ -435,6 +640,7 @@ with tabs[3]:
             yaxis_title="Predictive accuracy (%)",
             height=460,
             hovermode="closest",
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig5, use_container_width=True)
 
@@ -445,15 +651,16 @@ with tabs[3]:
             value=float(recommend_solution(pareto_df, priority="balanced")["w0"]),
         )
         chosen = solutions_df[np.isclose(solutions_df["w0"], w0_choice)].iloc[0]
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Accuracy", f"{chosen['accuracy_pct']:.1f}%")
-        m2.metric("Mean DIR", f"{chosen['mean_DIR']:.2f}")
-        m3.metric("Utility retention", f"{chosen['utility_retention_pct']:.1f}%")
-        m4.metric("Fairness loss", f"{chosen['fairness_loss']:.3f}")
+        metric_card_row([
+            ("🎯", "Accuracy", f"{chosen['accuracy_pct']:.1f}%", f"w0={w0_choice:.2f}"),
+            ("⚖️", "Mean DIR", f"{chosen['mean_DIR']:.2f}", "Disparate Impact Ratio"),
+            ("🛡️", "Utility Retention", f"{chosen['utility_retention_pct']:.1f}%", "vs. baseline"),
+            ("📉", "Fairness Loss", f"{chosen['fairness_loss']:.3f}", "Lower is fairer"),
+        ])
 
-        recommended = recommend_solution(pareto_df, utility_floor_pct=95.0, priority="balanced")
+        recommended = recommend_solution(pareto_df, utility_floor_pct=float(utility_floor_pct), priority="balanced")
         st.caption(
-            f"💡 A balanced starting point (≥95% utility retention, lowest fairness loss): "
+            f"💡 A balanced starting point (≥{utility_floor_pct}% utility retention, lowest fairness loss): "
             f"**w₀ = {recommended['w0']:.2f}** — accuracy {recommended['accuracy_pct']:.1f}%, "
             f"mean DIR {recommended['mean_DIR']:.2f}. This is a suggestion to anchor discussion, "
             "not the final word — that's the governance layer's job, not the optimizer's."
@@ -470,3 +677,12 @@ with tabs[3]:
             )
     else:
         st.info("Click **Run MOO sweep** above to populate the Pareto frontier.", icon="👆")
+
+st.markdown(
+    """
+    <div style="text-align:center; color:var(--text-secondary); font-size:0.78rem; margin-top:2rem;">
+        Built for research. Designed for impact. &nbsp;|&nbsp; DAT Fairness Lab © 2026
+    </div>
+    """,
+    unsafe_allow_html=True,
+)

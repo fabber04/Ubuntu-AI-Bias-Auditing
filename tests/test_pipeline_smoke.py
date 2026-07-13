@@ -90,3 +90,31 @@ def test_pareto_extraction():
     })
     pareto = extract_pareto_front(solutions_df)
     assert pareto["is_pareto_optimal"].all()  # monotonic trade-off -> all non-dominated
+
+
+def test_population_stability_index():
+    from dat_framework.optimization.drift_monitoring import population_stability_index
+    rng = np.random.default_rng(0)
+    same_a = rng.normal(0, 1, 2000)
+    same_b = rng.normal(0, 1, 2000)
+    shifted = rng.normal(2.0, 1, 2000)
+    assert population_stability_index(same_a, same_b) < 0.10
+    assert population_stability_index(same_a, shifted) > 0.25
+
+
+def test_drift_check_runs(df):
+    from dat_framework.optimization.drift_monitoring import run_drift_check
+    df2 = generate_dataset(SyntheticDataConfig(n_records=1000, seed=2))
+    df2 = assign_intersectional_subgroups(df2, PROTECTED_ATTRIBUTES)
+    report = run_drift_check(df, df2, feature_cols=["qualification_score"], min_group_size=5)
+    assert isinstance(report.fallback_triggered, bool)
+
+
+def test_audit_log_chain(tmp_path, df):
+    from dat_framework.optimization.audit_log import AuditLog
+    log = AuditLog(str(tmp_path / "audit.jsonl"))
+    log.record(actor="tester", action="fairness_audit", dataset=df, decision_rationale="test entry")
+    log.record(actor="tester", action="model_selection", dataset=df, decision_rationale="test 2", w0_selected=0.5)
+    assert log.verify_chain()
+    entries = log.read_all()
+    assert len(entries) == 2
