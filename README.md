@@ -72,6 +72,22 @@ streamlit run app/streamlit_app.py
 ### Pareto Frontier Selection
 ![Pareto Frontier](docs/screenshots/pareto-frontier.png)
 
+
+### Intersectional Subgroup Metrics
+
+| Subgroup | DIR | DPD | EOD | n_marginalized | DIR Violation |
+|---|---|---|---|---|---|
+| rurality, gender, disability, socio_economic, education | 0.29 | -0.48 | 0.99 | 31 | ✅ |
+| gender, disability | 0.37 | -0.42 | 0.82 | 12 | ✅ |
+| rurality, gender, disability, socio_economic | 0.47 | -0.35 | 0.69 | 19 | ✅ |
+| rurality, disability, socio_economic | 0.52 | -0.32 | 0.68 | 20 | ✅ |
+| rurality, gender, disability, education | 0.53 | -0.31 | 0.59 | 14 | ✅ |
+| rurality, disability, socio_economic, education | 0.54 | -0.31 | 0.58 | 22 | ✅ |
+| rurality, gender, socio_economic, education | 0.58 | -0.28 | 0.53 | 233 | ✅ |
+| rurality, socio_economic, education | 0.61 | -0.26 | 0.52 | 226 | ✅ |
+| disability, socio_economic | 0.65 | -0.23 | 0.46 | 16 | ✅ |
+| gender, education | 0.65 | -0.23 | 0.46 | 89 | ✅ |
+
 The app will:
 1. Let you pick which Sub-Saharan countries/indicators to pull from World Bank (live API call —
    needs internet).
