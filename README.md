@@ -61,6 +61,17 @@ pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Fairness Diagnostics
+![Fairness Diagnostics](docs/screenshots/diagnostics.png)
+
+### Pareto Frontier Selection
+![Pareto Frontier](docs/screenshots/pareto-frontier.png)
+
 The app will:
 1. Let you pick which Sub-Saharan countries/indicators to pull from World Bank (live API call —
    needs internet).
